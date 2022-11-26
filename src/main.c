@@ -88,9 +88,7 @@ static void deleteTickets()
     LIST *ticketList = createList();
     if(ticketList != NULL)
     {
-        char *path = MEMAllocFromDefaultHeapEx(FS_ALIGN(FS_MAX_PATH), 0x40);
-        OSBlockMove(path, TICKET_BUCKET, strlen(TICKET_BUCKET) + 1, false);
-
+        char path[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = TICKET_BUCKET;
         char *inSentence = path + strlen(TICKET_BUCKET);
         FSADirectoryHandle dir;
         FSError ret = FSAOpenDir(fsaClient, path, &dir);
@@ -111,6 +109,7 @@ static void deleteTickets()
             void *tmpBuffer;
             size_t tmpBufSize = 0;
             MCPTitleListType titleEntry __attribute__((__aligned__(0x40)));
+            FSAFileHandle fh;
             // Loop through all the folder inside of the ticket bucket
             while(!emgBrk && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
             {
@@ -162,7 +161,7 @@ static void deleteTickets()
 
                                 if(keep)
                                 {
-                                    uint64_t *tid = MEMAllocFromDefaultHeap(sizeof(uint64_t));
+                                    tid = MEMAllocFromDefaultHeap(sizeof(uint64_t));
                                     if(!tid)
                                     {
                                         emgBrk = true;
@@ -215,7 +214,6 @@ static void deleteTickets()
                                     FSARemove(fsaClient, path);
                                 else
                                 {
-                                    FSAFileHandle fh;
                                     if(FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fh) != FS_ERROR_OK)
                                     {
                                         WHBLogPrintf("Error opening %s", path);
@@ -230,8 +228,8 @@ static void deleteTickets()
                                             if(tmpBufSize != 0)
                                                 MEMFreeToDefaultHeap(tmpBuffer);
 
-                                            tmpBufSize = sec->size;
-                                            tmpBuffer = MEMAllocFromDefaultHeapEx(FS_ALIGN(tmpBufSize), 0x40);
+                                            tmpBufSize = FS_ALIGN(sec->size);
+                                            tmpBuffer = MEMAllocFromDefaultHeapEx(tmpBufSize, 0x40);
                                             if(tmpBuffer == NULL)
                                             {
                                                 WHBLogPrint("EOM!");
