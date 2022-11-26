@@ -160,128 +160,124 @@ static void deleteTickets()
 
                 strcpy(inSentence, entry.name);
                 ret = FSAOpenDir(fsaClient, path, &dir2);
-                if(ret == FS_ERROR_OK)
+                if(ret != FS_ERROR_OK)
                 {
-                    strcat(inSentence, "/");
-                    fileName = inSentence + strlen(inSentence);
-                    // Loop through all the subfolders
-                    while(!emgBrk && FSAReadDir(fsaClient, dir2, &entry) == FS_ERROR_OK)
-                    {
-                        if(entry.name[0] == '.' || (entry.info.flags & FS_STAT_DIRECTORY) || strlen(entry.name) != 12)
-                            continue;
+                    WHBLogPrintf("Error opening %s", path);
+                    WHBLogPrint(FSAGetStatusStr(ret));
+                    emgBrk = true;
+                    break;
+                }
 
-                        strcpy(fileName, entry.name);
-                        ret = readFile(path, &file, entry.info.size);
-                        if(ret != FS_ERROR_OK)
+                strcat(inSentence, "/");
+                fileName = inSentence + strlen(inSentence);
+                // Loop through all the subfolders
+                while(!emgBrk && FSAReadDir(fsaClient, dir2, &entry) == FS_ERROR_OK)
+                {
+                    if(entry.name[0] == '.' || (entry.info.flags & FS_STAT_DIRECTORY) || strlen(entry.name) != 12)
+                        continue;
+
+                    strcpy(fileName, entry.name);
+                    ret = readFile(path, &file, entry.info.size);
+                    if(ret != FS_ERROR_OK)
+                    {
+                        WHBLogPrintf("Error reading %s", path);
+                        WHBLogPrint(FSAGetStatusStr(ret));
+                        emgBrk = true;
+                        break;
+                    }
+
+                    ticket = (TICKET *)file;
+                    fileEnd = ((uint8_t *)file) + entry.info.size;
+                    modified = false;
+                    // Loop through all the tickets inside of a file
+                    while(!emgBrk)
+                    {
+                        ptr = ((uint8_t *)ticket) + sizeof(TICKET);
+                        if(ticket->total_hdr_size > 0x14)
+                            ptr += ticket->total_hdr_size - 0x14;
+
+                        keep = true;
+                        // Check that title is installed
+                        if(MCP_GetTitleInfo(mcpHandle, ticket->tid, &titleEntry) != 0)
+                            keep = false;
+                        // Check for duplicated tickets (ignoring DLC tickets)
+                        else if(!isDLC(ticket->tid))
                         {
-                            WHBLogPrintf("Error reading %s", path);
-                            WHBLogPrint(FSAGetStatusStr(ret));
-                            emgBrk = true;
-                            break;
+                            forEachListEntry(handledIds, tid)
+                            {
+                                if(ticket->tid == *tid)
+                                {
+                                    keep = false;
+                                    break;
+                                }
+                            }
                         }
 
-                        ticket = (TICKET *)file;
-                        fileEnd = ((uint8_t *)file) + entry.info.size;
-                        modified = false;
-                        // Loop through all the tickets inside of a file
-                        while(!emgBrk)
+                        if(keep)
                         {
-                            ptr = ((uint8_t *)ticket) + sizeof(TICKET);
-                            if(ticket->total_hdr_size > 0x14)
-                                ptr += ticket->total_hdr_size - 0x14;
-
-                            keep = true;
-                            // Check that title is installed
-                            if(MCP_GetTitleInfo(mcpHandle, ticket->tid, &titleEntry) != 0)
-                                keep = false;
-                            // Check for duplicated tickets (ignoring DLC tickets)
-                            else if(!isDLC(ticket->tid))
+                            tid = MEMAllocFromDefaultHeap(sizeof(uint64_t));
+                            if(!tid)
                             {
-                                forEachListEntry(handledIds, tid)
-                                {
-                                    if(ticket->tid == *tid)
-                                    {
-                                        keep = false;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if(keep)
-                            {
-                                tid = MEMAllocFromDefaultHeap(sizeof(uint64_t));
-                                if(!tid)
-                                {
-                                    emgBrk = true;
-                                    break;
-                                }
-
-                                *tid = ticket->tid;
-                                addToListEnd(handledIds, tid);
-                                sec = MEMAllocFromDefaultHeap(sizeof(TICKET_SECTION));
-                                if(!sec)
-                                {
-                                    WHBLogPrint("EOM!");
-                                    emgBrk = true;
-                                    break;
-                                }
-
-                                sec->start = (uint8_t *)ticket;
-                                sec->size = ptr - sec->start;
-
-                                if(!addToListEnd(ticketList, sec))
-                                {
-                                    WHBLogPrint("EOM!");
-                                    MEMFreeToDefaultHeap(sec);
-                                    emgBrk = true;
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                ++deletedTickets;
-                                modified = true;
-                            }
-
-                            if(ptr == fileEnd)
-                                break;
-                            if(ptr > fileEnd)
-                            {
-                                WHBLogPrintf("Filesize missmatch at %s!", path);
                                 emgBrk = true;
                                 break;
                             }
 
-                            ticket = (TICKET *)ptr;
+                            *tid = ticket->tid;
+                            addToListEnd(handledIds, tid);
+                            sec = MEMAllocFromDefaultHeap(sizeof(TICKET_SECTION));
+                            if(!sec)
+                            {
+                                WHBLogPrint("EOM!");
+                                emgBrk = true;
+                                break;
+                            }
+
+                            sec->start = (uint8_t *)ticket;
+                            sec->size = ptr - sec->start;
+
+                            if(!addToListEnd(ticketList, sec))
+                            {
+                                WHBLogPrint("EOM!");
+                                MEMFreeToDefaultHeap(sec);
+                                emgBrk = true;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            ++deletedTickets;
+                            modified = true;
                         }
 
-                        // In case there was a matching ticket inside of the file either delete or recreate it with the remembered tickets only
-                        if(modified)
+                        if(ptr == fileEnd)
+                            break;
+                        if(ptr > fileEnd)
                         {
-                            if(getListSize(ticketList) == 0)
-                                FSARemove(fsaClient, path);
-                            else
+                            WHBLogPrintf("Filesize missmatch at %s!", path);
+                            emgBrk = true;
+                            break;
+                        }
+
+                        ticket = (TICKET *)ptr;
+                    }
+
+                    // In case there was a matching ticket inside of the file either delete or recreate it with the remembered tickets only
+                    if(modified)
+                    {
+                        if(getListSize(ticketList) == 0)
+                            FSARemove(fsaClient, path);
+                        else
+                        {
+                            if(FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle) != FS_ERROR_OK)
                             {
-                                if(FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle) != FS_ERROR_OK)
-                                {
-                                    WHBLogPrintf("Error opening %s", path);
-                                    emgBrk = true;
-                                    break;
-                                }
+                                WHBLogPrintf("Error opening %s", path);
+                                emgBrk = true;
+                                break;
+                            }
 
-                                forEachListEntry(ticketList, sec)
-                                {
-                                    ret = writeTicket(sec->start, sec->size);
-                                    if(ret != FS_ERROR_OK)
-                                    {
-                                        WHBLogPrintf("Error writing %s", path);
-                                        WHBLogPrint(FSAGetStatusStr(ret));
-                                        emgBrk = true;
-                                        break;
-                                    }
-                                }
-
-                                ret = closeTicket();
+                            forEachListEntry(ticketList, sec)
+                            {
+                                ret = writeTicket(sec->start, sec->size);
                                 if(ret != FS_ERROR_OK)
                                 {
                                     WHBLogPrintf("Error writing %s", path);
@@ -290,22 +286,32 @@ static void deleteTickets()
                                     break;
                                 }
                             }
-                        }
 
-                        clearList(ticketList, true);
-                        MEMFreeToDefaultHeap(file);
+                            ret = closeTicket();
+                            if(ret != FS_ERROR_OK)
+                            {
+                                WHBLogPrintf("Error writing %s", path);
+                                WHBLogPrint(FSAGetStatusStr(ret));
+                                emgBrk = true;
+                                break;
+                            }
+                        }
                     }
 
-                    FSACloseDir(fsaClient, dir2);
+                    clearList(ticketList, true);
+                    MEMFreeToDefaultHeap(file);
                 }
-                else
-                    WHBLogPrintf("Error opening %s", path);
+
+                FSACloseDir(fsaClient, dir2);
             }
 
             FSACloseDir(fsaClient, dir);
         }
         else
+        {
             WHBLogPrintf("Error opening %s", path);
+            WHBLogPrint(FSAGetStatusStr(ret));
+        }
 
         destroyList(ticketList, true);
     }
