@@ -240,7 +240,14 @@ static void deleteTickets()
                                         }
 
                                         OSBlockMove(tmpBuffer, sec->start, sec->size, false);
-                                        FSAWriteFile(fsaClient, tmpBuffer, 1, sec->size, fh, 0);
+                                        ret = FSAWriteFile(fsaClient, tmpBuffer, sec->size, 1, fh, 0);
+                                        if(ret != 1)
+                                        {
+                                            WHBLogPrintf("Error writing %s", path);
+                                            WHBLogPrint(FSAGetStatusStr(ret));
+                                            emgBrk = true;
+                                            break;
+                                        }
                                     }
 
                                     FSACloseFile(fsaClient, fh);
