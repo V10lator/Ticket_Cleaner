@@ -268,9 +268,11 @@ static void deleteTickets()
                             FSARemove(fsaClient, path);
                         else
                         {
-                            if(FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle) != FS_ERROR_OK)
+                            ret = FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle);
+                            if(ret != FS_ERROR_OK)
                             {
                                 WHBLogPrintf("Error opening %s", path);
+                                WHBLogPrint(FSAGetStatusStr(ret));
                                 emgBrk = true;
                                 break;
                             }
