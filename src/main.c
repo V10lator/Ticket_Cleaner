@@ -289,13 +289,16 @@ static void deleteTickets()
                                 }
                             }
 
-                            ret = closeTicket();
-                            if(ret != FS_ERROR_OK)
+                            if(!emgBrk)
                             {
-                                WHBLogPrintf("Error writing %s", path);
-                                WHBLogPrint(FSAGetStatusStr(ret));
-                                emgBrk = true;
-                                break;
+                                ret = closeTicket();
+                                if(ret != FS_ERROR_OK)
+                                {
+                                    WHBLogPrintf("Error writing %s", path);
+                                    WHBLogPrint(FSAGetStatusStr(ret));
+                                    emgBrk = true;
+                                    break;
+                                }
                             }
                         }
                     }
