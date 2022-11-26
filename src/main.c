@@ -16,16 +16,18 @@
  * with this program; if not, If not, see <http://www.gnu.org/licenses/>.  *
  ***************************************************************************/
 
+#include <coreinit/filesystem_fsa.h>
+#include <coreinit/foreground.h>
 #include <coreinit/mcp.h>
 #include <coreinit/memdefaultheap.h>
 #include <coreinit/memory.h>
-#include <coreinit/filesystem_fsa.h>
+#include <coreinit/title.h>
 #include <mocha/mocha.h>
 
 #include <sysapp/launch.h>
-#include <whb/proc.h>
+#include <proc_ui/procui.h>
 #include <whb/log.h>
-#include <whb/log_udp.h>
+#include <whb/log_console.h>
 
 #include <stdio.h>
 
@@ -172,7 +174,7 @@ static void deleteTickets()
                                     sec = MEMAllocFromDefaultHeap(sizeof(TICKET_SECTION));
                                     if(!sec)
                                     {
-                                        WHBLogPrint("EOF!");
+                                        WHBLogPrint("EOM!");
                                         emgBrk = true;
                                         break;
                                     }
@@ -182,7 +184,7 @@ static void deleteTickets()
 
                                     if(!addToListEnd(ticketList, sec))
                                     {
-                                        WHBLogPrint("EOF!");
+                                        WHBLogPrint("EOM!");
                                         MEMFreeToDefaultHeap(sec);
                                         emgBrk = true;
                                         break;
@@ -198,7 +200,7 @@ static void deleteTickets()
                                     break;
                                 if(ptr > fileEnd)
                                 {
-                                    WHBLogPrint("Filesize missmatch!");
+                                    WHBLogPrintf("Filesize missmatch at %s!", path);
                                     emgBrk = true;
                                     break;
                                 }
@@ -232,7 +234,7 @@ static void deleteTickets()
                                             tmpBuffer = MEMAllocFromDefaultHeapEx(FS_ALIGN(tmpBufSize), 0x40);
                                             if(tmpBuffer == NULL)
                                             {
-                                                WHBLogPrint("EOF!");
+                                                WHBLogPrint("EOM!");
                                                 FSACloseFile(fsaClient, fh);
                                                 emgBrk = true;
                                                 break;
@@ -274,11 +276,38 @@ static void deleteTickets()
     WHBLogPrintf("%u tickets deleted!", deletedTickets);
 }
 
+static uint32_t homeCallback(void *ctx)
+{
+    uint64_t tid = OSGetTitleID();
+    if(tid == 0x0005000013374842 || (tid & 0xFFFFFFFFFFFFF0FF) == 0x000500101004A000) // HBL
+        SYSRelaunchTitle(0, NULL);
+    else
+        SYSLaunchMenu();
+
+// TODO: This causes a blackscreen in the Wii U menu
+//    WHBLogConsoleFree();
+    return 0;
+}
+
+static bool procLoop()
+{
+    switch(ProcUIProcessMessages(true))
+    {
+        case PROCUI_STATUS_EXITING:
+            return false;
+        case PROCUI_STATUS_RELEASE_FOREGROUND:
+            ProcUIDrawDoneRelease();
+        default:
+            return true;
+    }
+}
+
 int main(void)
 {
+    WHBLogConsoleInit();
+    WHBLogConsoleSetColor(0x000000FF);
     FSAInit();
     fsaClient = FSAAddClient(NULL);
-    WHBLogUdpInit();
     if(fsaClient)
     {
         if(Mocha_InitLibrary() == MOCHA_RESULT_SUCCESS)
@@ -289,7 +318,8 @@ int main(void)
                 mcpHandle = MCP_Open();
                 if(mcpHandle != 0)
                 {
-                    WHBLogPrint("Deleting tickets, this might take some time");
+                    WHBLogPrint("Deleting tickets, this might take some time...");
+                    WHBLogConsoleDraw();
                     deleteTickets();
                     MCP_Close(mcpHandle);
                 }
@@ -312,9 +342,14 @@ int main(void)
         WHBLogPrint("No FSA client!");
 
     FSAShutdown();
+    ProcUIInit(OSSavesDone_ReadyToRelease);
+    ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
+    OSEnableHomeButtonMenu(FALSE);
 
-    WHBProcInit();
-    SYSLaunchMenu();
-    while(WHBProcIsRunning()) {}
+    WHBLogPrint("");
+    WHBLogPrint("Press HOME to exit");
+    WHBLogConsoleDraw();
+
+    while(procLoop()) {}
     return 0;
 }
