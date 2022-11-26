@@ -263,6 +263,8 @@ static void deleteTickets()
             }
 
             FSACloseDir(fsaClient, dir);
+            if(tmpBufSize != 0)
+                MEMFreeToDefaultHeap(tmpBuffer);
         }
         else
             WHBLogPrintf("Error opening %s", path);
