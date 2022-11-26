@@ -109,6 +109,7 @@ static void deleteTickets()
             void *tmpBuffer;
             size_t tmpBufSize = 0;
             MCPTitleListType titleEntry __attribute__((__aligned__(0x40)));
+            FSError err;
             FSAFileHandle fh;
             // Loop through all the folder inside of the ticket bucket
             while(!emgBrk && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
@@ -240,7 +241,14 @@ static void deleteTickets()
                                         }
 
                                         OSBlockMove(tmpBuffer, sec->start, sec->size, false);
-                                        FSAWriteFile(fsaClient, tmpBuffer, 1, sec->size, fh, 0);
+                                        ret = FSAWriteFile(fsaClient, tmpBuffer, sec->size, 1, fh, 0);
+                                        if(ret != 1)
+                                        {
+                                            WHBLogPrintf("Error writing %s", path);
+                                            WHBLogPrint(FSAGetStatusStr(ret));
+                                            emgBrk = true;
+                                            break;
+                                        }
                                     }
 
                                     FSACloseFile(fsaClient, fh);
