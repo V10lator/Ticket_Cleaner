@@ -76,7 +76,6 @@ static FSError readFile(const char *path, void **buffer, size_t size)
         FSACloseFile(fsaClient, handle);
     }
 
-    *buffer = NULL;
     return err;
 }
 
