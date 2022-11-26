@@ -226,8 +226,8 @@ static void deleteTickets()
                             *tid = ticket->tid;
                             if(!addToListEnd(handledIds, tid))
                             {
-                                WHBLogPrint("EOM!");
                                 MEMFreeToDefaultHeap(tid);
+                                WHBLogPrint("EOM!");
                                 emgBrk = true;
                                 break;
                             }
@@ -244,8 +244,8 @@ static void deleteTickets()
 
                             if(!addToListEnd(ticketList, sec))
                             {
-                                WHBLogPrint("EOM!");
                                 MEMFreeToDefaultHeap(sec);
+                                WHBLogPrint("EOM!");
                                 emgBrk = true;
                                 break;
                             }
