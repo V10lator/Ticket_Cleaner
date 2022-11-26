@@ -218,12 +218,19 @@ static void deleteTickets()
                             tid = MEMAllocFromDefaultHeap(sizeof(uint64_t));
                             if(!tid)
                             {
+                                WHBLogPrint("EOM!");
                                 emgBrk = true;
                                 break;
                             }
 
                             *tid = ticket->tid;
-                            addToListEnd(handledIds, tid);
+                            if(!addToListEnd(handledIds, tid))
+                            {
+                                WHBLogPrint("EOM!");
+                                MEMFreeToDefaultHeap(tid);
+                                emgBrk = true;
+                                break;
+                            }
                             sec = MEMAllocFromDefaultHeap(sizeof(TICKET_SECTION));
                             if(!sec)
                             {
