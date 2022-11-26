@@ -39,6 +39,7 @@
 #define TICKET_BUCKET "/vol/slc/sys/rights/ticket/apps/"
 #define FS_ALIGN(x)   ((x + 0x3F) & ~(0x3F))
 #define isDLC(tid)    (((uint32_t)(tid >> 32)) == 0x0005000C)
+#define WRITE_BUFSIZE (1024 * 1024) // 1 MB
 
 typedef struct
 {
@@ -48,6 +49,10 @@ typedef struct
 
 static FSAClientHandle fsaClient;
 static int mcpHandle;
+
+static FSAFileHandle fileHandle;
+static uint8_t *writeBuffer;
+static size_t writeBufferFill = 0;
 
 static bool readFile(const char *path, void **buffer, size_t size)
 {
@@ -73,6 +78,46 @@ static bool readFile(const char *path, void **buffer, size_t size)
 
     *buffer = NULL;
     return false;
+}
+
+static FSError writeTicket(const uint8_t *buffer, size_t size)
+{
+    size_t newBufSize = writeBufferFill + size;
+    if(newBufSize < WRITE_BUFSIZE)
+    {
+        OSBlockMove(writeBuffer + writeBufferFill, buffer, size, false);
+        writeBufferFill = newBufSize;
+        return FS_ERROR_OK;
+    }
+
+    newBufSize -= WRITE_BUFSIZE;
+    OSBlockMove(writeBuffer + writeBufferFill, buffer, size - newBufSize, false);
+    FSError ret = FSAWriteFile(fsaClient, writeBuffer, WRITE_BUFSIZE, 1, fileHandle, 0);
+    if(ret != 1)
+    {
+        FSACloseFile(fsaClient, fileHandle);
+        return ret;
+    }
+
+    writeBufferFill = 0;
+    return newBufSize != 0 ? writeTicket(buffer + (size - newBufSize), newBufSize) : FS_ERROR_OK;
+}
+
+static FSError closeTicket()
+{
+    if(writeBufferFill != 0)
+    {
+        FSError ret = FSAWriteFile(fsaClient, writeBuffer, writeBufferFill, 1, fileHandle, 0);
+        if(ret != 1)
+        {
+            FSACloseFile(fsaClient, fileHandle);
+            return ret;
+        }
+
+        writeBufferFill = 0;
+    }
+
+    return FSACloseFile(fsaClient, fileHandle);
 }
 
 static void deleteTickets()
@@ -106,10 +151,7 @@ static void deleteTickets()
             uint8_t *fileEnd;
             uint8_t *ptr;
             bool emgBrk = false;
-            void *tmpBuffer;
-            size_t tmpBufSize = 0;
             MCPTitleListType titleEntry __attribute__((__aligned__(0x40)));
-            FSAFileHandle fh;
             // Loop through all the folder inside of the ticket bucket
             while(!emgBrk && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
             {
@@ -214,34 +256,17 @@ static void deleteTickets()
                                     FSARemove(fsaClient, path);
                                 else
                                 {
-                                    if(FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fh) != FS_ERROR_OK)
+                                    if(FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle) != FS_ERROR_OK)
                                     {
                                         WHBLogPrintf("Error opening %s", path);
-                                        emgBrk == true;
+                                        emgBrk = true;
                                         break;
                                     }
 
                                     forEachListEntry(ticketList, sec)
                                     {
-                                        if(sec->size > tmpBufSize)
-                                        {
-                                            if(tmpBufSize != 0)
-                                                MEMFreeToDefaultHeap(tmpBuffer);
-
-                                            tmpBufSize = FS_ALIGN(sec->size);
-                                            tmpBuffer = MEMAllocFromDefaultHeapEx(tmpBufSize, 0x40);
-                                            if(tmpBuffer == NULL)
-                                            {
-                                                WHBLogPrint("EOM!");
-                                                FSACloseFile(fsaClient, fh);
-                                                emgBrk = true;
-                                                break;
-                                            }
-                                        }
-
-                                        OSBlockMove(tmpBuffer, sec->start, sec->size, false);
-                                        ret = FSAWriteFile(fsaClient, tmpBuffer, sec->size, 1, fh, 0);
-                                        if(ret != 1)
+                                        ret = writeTicket(sec->start, sec->size);
+                                        if(ret != FS_ERROR_OK)
                                         {
                                             WHBLogPrintf("Error writing %s", path);
                                             WHBLogPrint(FSAGetStatusStr(ret));
@@ -250,7 +275,14 @@ static void deleteTickets()
                                         }
                                     }
 
-                                    FSACloseFile(fsaClient, fh);
+                                    ret = closeTicket();
+                                    if(ret != FS_ERROR_OK)
+                                    {
+                                        WHBLogPrintf("Error writing %s", path);
+                                        WHBLogPrint(FSAGetStatusStr(ret));
+                                        emgBrk = true;
+                                        break;
+                                    }
                                 }
                             }
 
@@ -268,8 +300,6 @@ static void deleteTickets()
             }
 
             FSACloseDir(fsaClient, dir);
-            if(tmpBufSize != 0)
-                MEMFreeToDefaultHeap(tmpBuffer);
         }
         else
             WHBLogPrintf("Error opening %s", path);
@@ -313,42 +343,50 @@ int main(void)
 {
     WHBLogConsoleInit();
     WHBLogConsoleSetColor(0x000000FF);
-    FSAInit();
-    fsaClient = FSAAddClient(NULL);
-    if(fsaClient)
+    writeBuffer = MEMAllocFromDefaultHeapEx(FS_ALIGN(WRITE_BUFSIZE), 0x40);
+    if(writeBuffer != NULL)
     {
-        if(Mocha_InitLibrary() == MOCHA_RESULT_SUCCESS)
+        FSAInit();
+        fsaClient = FSAAddClient(NULL);
+        if(fsaClient)
         {
-            Mocha_UnlockFSClientEx(fsaClient);
-            if(FSAMount(fsaClient, "/dev/slc01", "/vol/slc", FSA_MOUNT_FLAG_LOCAL_MOUNT, NULL, 0) == FS_ERROR_OK)
+            if(Mocha_InitLibrary() == MOCHA_RESULT_SUCCESS)
             {
-                mcpHandle = MCP_Open();
-                if(mcpHandle != 0)
+                Mocha_UnlockFSClientEx(fsaClient);
+                if(FSAMount(fsaClient, "/dev/slc01", "/vol/slc", FSA_MOUNT_FLAG_LOCAL_MOUNT, NULL, 0) == FS_ERROR_OK)
                 {
-                    WHBLogPrint("Deleting tickets, this might take some time...");
-                    WHBLogConsoleDraw();
-                    deleteTickets();
-                    MCP_Close(mcpHandle);
+                    mcpHandle = MCP_Open();
+                    if(mcpHandle != 0)
+                    {
+                        WHBLogPrint("Deleting tickets, this might take some time...");
+                        WHBLogConsoleDraw();
+                        deleteTickets();
+                        MCP_Close(mcpHandle);
+                    }
+                    else
+                        WHBLogPrint("Error opening MCP!");
+
+                    FSAUnmount(fsaClient, "/vol/slc", FSA_UNMOUNT_FLAG_NONE);
                 }
                 else
-                    WHBLogPrint("Error opening MCP!");
+                    WHBLogPrint("Error mounting SLC!");
 
-                FSAUnmount(fsaClient, "/vol/slc", FSA_UNMOUNT_FLAG_NONE);
+                Mocha_DeInitLibrary();
             }
             else
-                WHBLogPrint("Error mounting SLC!");
+                WHBLogPrint("Libmocha error!");
 
-            Mocha_DeInitLibrary();
+            FSADelClient(fsaClient);
         }
         else
-            WHBLogPrint("Libmocha error!");
+            WHBLogPrint("No FSA client!");
 
-        FSADelClient(fsaClient);
+        FSAShutdown();
+        MEMFreeToDefaultHeap(writeBuffer);
     }
     else
-        WHBLogPrint("No FSA client!");
+        WHBLogPrint("EOM!");
 
-    FSAShutdown();
     ProcUIInit(OSSavesDone_ReadyToRelease);
     ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
     OSEnableHomeButtonMenu(FALSE);
