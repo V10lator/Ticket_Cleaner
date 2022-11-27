@@ -370,31 +370,38 @@ int main(void)
         fsaClient = FSAAddClient(NULL);
         if(fsaClient)
         {
-            if(Mocha_InitLibrary() == MOCHA_RESULT_SUCCESS)
+            MochaUtilsStatus ret = Mocha_InitLibrary();
+            if(ret)
             {
-                Mocha_UnlockFSClientEx(fsaClient);
-                if(FSAMount(fsaClient, "/dev/slc01", "/vol/slc", FSA_MOUNT_FLAG_LOCAL_MOUNT, NULL, 0) == FS_ERROR_OK)
+                ret = Mocha_UnlockFSClientEx(fsaClient);
+                if(ret == MOCHA_RESULT_SUCCESS)
                 {
-                    mcpHandle = MCP_Open();
-                    if(mcpHandle != 0)
+                    FSError err = FSAMount(fsaClient, "/dev/slc01", "/vol/slc", FSA_MOUNT_FLAG_LOCAL_MOUNT, NULL, 0);
+                    if(err == FS_ERROR_OK)
                     {
-                        WHBLogPrint("Deleting tickets, this might take some time...");
-                        WHBLogConsoleDraw();
-                        deleteTickets();
-                        MCP_Close(mcpHandle);
+                        mcpHandle = MCP_Open();
+                        if(mcpHandle != 0)
+                        {
+                            WHBLogPrint("Deleting tickets, this might take some time...");
+                            WHBLogConsoleDraw();
+                            deleteTickets();
+                            MCP_Close(mcpHandle);
+                        }
+                        else
+                            WHBLogPrint("Error opening MCP!");
+
+                        FSAUnmount(fsaClient, "/vol/slc", FSA_UNMOUNT_FLAG_NONE);
                     }
                     else
-                        WHBLogPrint("Error opening MCP!");
-
-                    FSAUnmount(fsaClient, "/vol/slc", FSA_UNMOUNT_FLAG_NONE);
+                        WHBLogPrintf("Error mounting SLC: %s!", FSAGetStatusStr(err));
                 }
                 else
-                    WHBLogPrint("Error mounting SLC!");
+                    WHBLogPrintf("Error unlocking FSAClient: -0x%04X!", -ret);
 
                 Mocha_DeInitLibrary();
             }
             else
-                WHBLogPrint("Libmocha error!");
+                WHBLogPrintf("Libmocha error: -0x%04X!", -ret);
 
             FSADelClient(fsaClient);
         }
