@@ -279,7 +279,15 @@ static void deleteTickets()
                     if(!error && modified)
                     {
                         if(getListSize(ticketList) == 0)
-                            FSARemove(fsaClient, path);
+                        {
+                            ret = FSARemove(fsaClient, path);
+                            if(ret != FS_ERROR_OK)
+                            {
+                                WHBLogPrintf("Error removing %s", path);
+                                WHBLogPrint(FSAGetStatusStr(ret));
+                                error = true;
+                            }
+                        }
                         else
                         {
                             ret = FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle);
