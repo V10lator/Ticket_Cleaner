@@ -228,8 +228,6 @@ static void deleteTickets()
                                     error = true;
                                     break;
                                 }
-
-                                *tid = ticket->tid;
                                 if(!addToListEnd(handledIds, tid))
                                 {
                                     MEMFreeToDefaultHeap(tid);
@@ -237,6 +235,8 @@ static void deleteTickets()
                                     error = true;
                                     break;
                                 }
+
+                                *tid = ticket->tid;
                             }
 
                             sec = MEMAllocFromDefaultHeap(sizeof(TICKET_SECTION));
@@ -246,10 +246,6 @@ static void deleteTickets()
                                 error = true;
                                 break;
                             }
-
-                            sec->start = (uint8_t *)ticket;
-                            sec->size = ptr - sec->start;
-
                             if(!addToListEnd(ticketList, sec))
                             {
                                 MEMFreeToDefaultHeap(sec);
@@ -257,6 +253,9 @@ static void deleteTickets()
                                 error = true;
                                 break;
                             }
+
+                            sec->start = (uint8_t *)ticket;
+                            sec->size = ptr - sec->start;
                         }
                         else
                         {
