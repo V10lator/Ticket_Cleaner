@@ -19,6 +19,8 @@
 
 #include <stdint.h>
 
+#include <wut_structsize.h>
+
 #ifdef __cplusplus
 extern "C"
 {

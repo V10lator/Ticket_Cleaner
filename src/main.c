@@ -16,6 +16,13 @@
  * with this program; if not, If not, see <http://www.gnu.org/licenses/>.  *
  ***************************************************************************/
 
+#include <list.h>
+#include <ticket.h>
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <coreinit/filesystem_fsa.h>
 #include <coreinit/foreground.h>
 #include <coreinit/mcp.h>
@@ -23,18 +30,10 @@
 #include <coreinit/memory.h>
 #include <coreinit/title.h>
 #include <mocha/mocha.h>
-
-#include <sysapp/launch.h>
 #include <proc_ui/procui.h>
+#include <sysapp/launch.h>
 #include <whb/log.h>
 #include <whb/log_console.h>
-
-#include <list.h>
-#include <ticket.h>
-
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
 
 #define COLOR_BACKGROUND 0x000033FF
 #define COLOR_RED        0x990000FF
