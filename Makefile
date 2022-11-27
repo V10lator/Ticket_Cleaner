@@ -35,10 +35,6 @@ BUILD		:=	build
 SOURCES		:=	src
 DATA		:=	data
 INCLUDES	:=	include
-CONTENT		:=
-ICON		:=
-TV_SPLASH	:=
-DRC_SPLASH	:=
 
 #-------------------------------------------------------------------------------
 # options for code generation
@@ -106,34 +102,6 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 
 export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
-ifneq (,$(strip $(CONTENT)))
-	export APP_CONTENT := $(TOPDIR)/$(CONTENT)
-endif
-
-ifneq (,$(strip $(ICON)))
-	export APP_ICON := $(TOPDIR)/$(ICON)
-else ifneq (,$(wildcard $(TOPDIR)/$(TARGET).png))
-	export APP_ICON := $(TOPDIR)/$(TARGET).png
-else ifneq (,$(wildcard $(TOPDIR)/icon.png))
-	export APP_ICON := $(TOPDIR)/icon.png
-endif
-
-ifneq (,$(strip $(TV_SPLASH)))
-	export APP_TV_SPLASH := $(TOPDIR)/$(TV_SPLASH)
-else ifneq (,$(wildcard $(TOPDIR)/tv-splash.png))
-	export APP_TV_SPLASH := $(TOPDIR)/tv-splash.png
-else ifneq (,$(wildcard $(TOPDIR)/splash.png))
-	export APP_TV_SPLASH := $(TOPDIR)/splash.png
-endif
-
-ifneq (,$(strip $(DRC_SPLASH)))
-	export APP_DRC_SPLASH := $(TOPDIR)/$(DRC_SPLASH)
-else ifneq (,$(wildcard $(TOPDIR)/drc-splash.png))
-	export APP_DRC_SPLASH := $(TOPDIR)/drc-splash.png
-else ifneq (,$(wildcard $(TOPDIR)/splash.png))
-	export APP_DRC_SPLASH := $(TOPDIR)/splash.png
-endif
-
 .PHONY: $(BUILD) clean all
 
 #-------------------------------------------------------------------------------
@@ -146,7 +114,7 @@ $(BUILD):
 #-------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).wuhb $(TARGET).rpx $(TARGET).elf
+	@rm -fr $(BUILD) $(TARGET).rpx $(TARGET).elf
 
 #-------------------------------------------------------------------------------
 else
@@ -157,9 +125,8 @@ DEPENDS	:=	$(OFILES:.o=.d)
 #-------------------------------------------------------------------------------
 # main targets
 #-------------------------------------------------------------------------------
-all	:	$(OUTPUT).wuhb
+all	:	$(OUTPUT).rpx
 
-$(OUTPUT).wuhb	:	$(OUTPUT).rpx
 $(OUTPUT).rpx	:	$(OUTPUT).elf
 $(OUTPUT).elf	:	$(OFILES)
 
