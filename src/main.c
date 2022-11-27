@@ -381,7 +381,6 @@ static bool procLoop()
 int main(void)
 {
     WHBLogConsoleInit();
-    WHBLogConsoleSetColor(COLOR_BACKGROUND);
     writeBuffer = MEMAllocFromDefaultHeapEx(FS_ALIGN(WRITE_BUFSIZE), 0x40);
     if(writeBuffer != NULL)
     {
@@ -401,6 +400,7 @@ int main(void)
                         mcpHandle = MCP_Open();
                         if(mcpHandle != 0)
                         {
+                            WHBLogConsoleSetColor(COLOR_BACKGROUND);
                             WHBLogPrint("Deleting tickets, this might take some time...");
                             WHBLogConsoleDraw();
                             deleteTickets();
