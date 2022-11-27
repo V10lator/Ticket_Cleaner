@@ -275,36 +275,35 @@ static void deleteTickets()
                         else
                         {
                             ret = FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle);
-                            if(ret != FS_ERROR_OK)
+                            if(ret == FS_ERROR_OK)
+                            {
+                                forEachListEntry(ticketList, sec)
+                                {
+                                    ret = writeTicket(sec->start, sec->size);
+                                    if(ret != FS_ERROR_OK)
+                                    {
+                                        WHBLogPrintf("Error writing %s", path);
+                                        WHBLogPrint(FSAGetStatusStr(ret));
+                                        emgBrk = true;
+                                    }
+                                }
+
+                                if(!emgBrk)
+                                {
+                                    ret = closeTicket();
+                                    if(ret != FS_ERROR_OK)
+                                    {
+                                        WHBLogPrintf("Error writing %s", path);
+                                        WHBLogPrint(FSAGetStatusStr(ret));
+                                        emgBrk = true;
+                                    }
+                                }
+                            }
+                            else
                             {
                                 WHBLogPrintf("Error opening %s", path);
                                 WHBLogPrint(FSAGetStatusStr(ret));
                                 emgBrk = true;
-                                break;
-                            }
-
-                            forEachListEntry(ticketList, sec)
-                            {
-                                ret = writeTicket(sec->start, sec->size);
-                                if(ret != FS_ERROR_OK)
-                                {
-                                    WHBLogPrintf("Error writing %s", path);
-                                    WHBLogPrint(FSAGetStatusStr(ret));
-                                    emgBrk = true;
-                                    break;
-                                }
-                            }
-
-                            if(!emgBrk)
-                            {
-                                ret = closeTicket();
-                                if(ret != FS_ERROR_OK)
-                                {
-                                    WHBLogPrintf("Error writing %s", path);
-                                    WHBLogPrint(FSAGetStatusStr(ret));
-                                    emgBrk = true;
-                                    break;
-                                }
                             }
                         }
                     }
