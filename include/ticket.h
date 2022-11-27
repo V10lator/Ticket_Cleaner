@@ -59,7 +59,7 @@ extern "C"
         uint16_t num_sect_header_entry_size;
         uint32_t header_flags;
     } TICKET;
-    // WUT_CHECK_OFFSET(TICKET, 0x0004, sig);
+    WUT_CHECK_OFFSET(TICKET, 0x0004, sig);
     WUT_CHECK_OFFSET(TICKET, 0x0140, issuer);
     WUT_CHECK_OFFSET(TICKET, 0x0180, ecdsa_pubkey);
     WUT_CHECK_OFFSET(TICKET, 0x01BC, version);
