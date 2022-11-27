@@ -459,8 +459,10 @@ int main(void)
     WHBLogPrint("Press HOME to exit");
     if(error)
         WHBLogConsoleSetColor(COLOR_RED);
-    WHBLogConsoleDraw();
 
-    while(procLoop()) {}
+    WHBLogConsoleDraw();
+    while(procLoop())
+        OSSleepTicks(OSMillisecondsToTicks(1000 / 60));
+
     return 0;
 }
