@@ -379,7 +379,7 @@ int main(void)
         if(fsaClient)
         {
             MochaUtilsStatus ret = Mocha_InitLibrary();
-            if(ret)
+            if(ret == MOCHA_RESULT_SUCCESS)
             {
                 ret = Mocha_UnlockFSClientEx(fsaClient);
                 if(ret == MOCHA_RESULT_SUCCESS)
