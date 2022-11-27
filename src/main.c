@@ -378,7 +378,7 @@ static bool procLoop()
     }
 }
 
-int main(void)
+int main()
 {
     WHBLogConsoleInit();
     writeBuffer = MEMAllocFromDefaultHeapEx(FS_ALIGN(WRITE_BUFSIZE), 0x40);
