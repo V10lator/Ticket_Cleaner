@@ -29,12 +29,15 @@
 #include <whb/log.h>
 #include <whb/log_console.h>
 
-#include <stdio.h>
-
 #include <list.h>
 #include <ticket.h>
 
+#include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
+
+#define COLOR_BACKGROUND 0x000033FF
+#define COLOR_RED        0x990000FF
 
 #define TICKET_BUCKET "/vol/slc/sys/rights/ticket/apps/"
 #define FS_ALIGN(x)   ((x + 0x3F) & ~(0x3F))
@@ -53,6 +56,8 @@ static int mcpHandle;
 static FSAFileHandle fileHandle;
 static uint8_t *writeBuffer;
 static size_t writeBufferFill = 0;
+
+static bool error = false;
 
 static FSError readFile(const char *path, void **buffer, size_t size)
 {
@@ -125,6 +130,7 @@ static void deleteTickets()
     if(handledIds == NULL)
     {
         WHBLogPrint("EOM!");
+        error = true;
         return;
     }
 
@@ -149,10 +155,9 @@ static void deleteTickets()
             uint64_t *tid;
             uint8_t *fileEnd;
             uint8_t *ptr;
-            bool emgBrk = false;
             MCPTitleListType titleEntry __attribute__((__aligned__(0x40)));
             // Loop through all the folder inside of the ticket bucket
-            while(!emgBrk && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
+            while(!error && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
             {
                 if(entry.name[0] == '.' || !(entry.info.flags & FS_STAT_DIRECTORY) || strlen(entry.name) != 4)
                     continue;
@@ -163,14 +168,14 @@ static void deleteTickets()
                 {
                     WHBLogPrintf("Error opening %s", path);
                     WHBLogPrint(FSAGetStatusStr(ret));
-                    emgBrk = true;
+                    error = true;
                     break;
                 }
 
                 strcat(inSentence, "/");
                 fileName = inSentence + strlen(inSentence);
                 // Loop through all the subfolders
-                while(!emgBrk && FSAReadDir(fsaClient, dir2, &entry) == FS_ERROR_OK)
+                while(!error && FSAReadDir(fsaClient, dir2, &entry) == FS_ERROR_OK)
                 {
                     if(entry.name[0] == '.' || (entry.info.flags & FS_STAT_DIRECTORY) || strlen(entry.name) != 12)
                         continue;
@@ -181,7 +186,7 @@ static void deleteTickets()
                     {
                         WHBLogPrintf("Error reading %s", path);
                         WHBLogPrint(FSAGetStatusStr(ret));
-                        emgBrk = true;
+                        error = true;
                         break;
                     }
 
@@ -189,7 +194,7 @@ static void deleteTickets()
                     fileEnd = ((uint8_t *)file) + entry.info.size;
                     modified = false;
                     // Loop through all the tickets inside of a file
-                    while(!emgBrk)
+                    while(!error)
                     {
                         ptr = ((uint8_t *)ticket) + sizeof(TICKET);
                         if(ticket->total_hdr_size > 0x14)
@@ -218,7 +223,7 @@ static void deleteTickets()
                             if(!tid)
                             {
                                 WHBLogPrint("EOM!");
-                                emgBrk = true;
+                                error = true;
                                 break;
                             }
 
@@ -227,14 +232,14 @@ static void deleteTickets()
                             {
                                 MEMFreeToDefaultHeap(tid);
                                 WHBLogPrint("EOM!");
-                                emgBrk = true;
+                                error = true;
                                 break;
                             }
                             sec = MEMAllocFromDefaultHeap(sizeof(TICKET_SECTION));
                             if(!sec)
                             {
                                 WHBLogPrint("EOM!");
-                                emgBrk = true;
+                                error = true;
                                 break;
                             }
 
@@ -245,7 +250,7 @@ static void deleteTickets()
                             {
                                 MEMFreeToDefaultHeap(sec);
                                 WHBLogPrint("EOM!");
-                                emgBrk = true;
+                                error = true;
                                 break;
                             }
                         }
@@ -260,7 +265,7 @@ static void deleteTickets()
                         if(ptr > fileEnd)
                         {
                             WHBLogPrintf("Filesize missmatch at %s!", path);
-                            emgBrk = true;
+                            error = true;
                             break;
                         }
 
@@ -284,18 +289,18 @@ static void deleteTickets()
                                     {
                                         WHBLogPrintf("Error writing %s", path);
                                         WHBLogPrint(FSAGetStatusStr(ret));
-                                        emgBrk = true;
+                                        error = true;
                                     }
                                 }
 
-                                if(!emgBrk)
+                                if(!error)
                                 {
                                     ret = closeTicket();
                                     if(ret != FS_ERROR_OK)
                                     {
                                         WHBLogPrintf("Error writing %s", path);
                                         WHBLogPrint(FSAGetStatusStr(ret));
-                                        emgBrk = true;
+                                        error = true;
                                     }
                                 }
                             }
@@ -303,7 +308,7 @@ static void deleteTickets()
                             {
                                 WHBLogPrintf("Error opening %s", path);
                                 WHBLogPrint(FSAGetStatusStr(ret));
-                                emgBrk = true;
+                                error = true;
                             }
                         }
                     }
@@ -321,12 +326,16 @@ static void deleteTickets()
         {
             WHBLogPrintf("Error opening %s", path);
             WHBLogPrint(FSAGetStatusStr(ret));
+            error = true;
         }
 
         destroyList(ticketList, true);
     }
     else
+    {
         WHBLogPrint("EOM!");
+        error = true;
+    }
 
     destroyList(handledIds, true);
     WHBLogPrintf("%u tickets deleted!", deletedTickets);
@@ -361,7 +370,7 @@ static bool procLoop()
 int main(void)
 {
     WHBLogConsoleInit();
-    WHBLogConsoleSetColor(0x000000FF);
+    WHBLogConsoleSetColor(COLOR_BACKGROUND);
     writeBuffer = MEMAllocFromDefaultHeapEx(FS_ALIGN(WRITE_BUFSIZE), 0x40);
     if(writeBuffer != NULL)
     {
@@ -387,31 +396,49 @@ int main(void)
                             MCP_Close(mcpHandle);
                         }
                         else
+                        {
                             WHBLogPrint("Error opening MCP!");
+                            error = true;
+                        }
 
                         FSAUnmount(fsaClient, "/vol/slc", FSA_UNMOUNT_FLAG_NONE);
                     }
                     else
+                    {
                         WHBLogPrintf("Error mounting SLC: %s!", FSAGetStatusStr(err));
+                        error = true;
+                    }
                 }
                 else
+                {
                     WHBLogPrintf("Error unlocking FSAClient: -0x%04X!", -ret);
+                    error = true;
+                }
 
                 Mocha_DeInitLibrary();
             }
             else
+            {
                 WHBLogPrintf("Libmocha error: -0x%04X!", -ret);
+                error = true;
+            }
 
             FSADelClient(fsaClient);
         }
         else
+        {
             WHBLogPrint("No FSA client!");
+            error = true;
+        }
 
         FSAShutdown();
         MEMFreeToDefaultHeap(writeBuffer);
     }
     else
+    {
         WHBLogPrint("EOM!");
+        error = true;
+    }
 
     ProcUIInit(OSSavesDone_ReadyToRelease);
     ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
@@ -419,6 +446,8 @@ int main(void)
 
     WHBLogPrint("");
     WHBLogPrint("Press HOME to exit");
+    if(error)
+        WHBLogConsoleSetColor(COLOR_RED);
     WHBLogConsoleDraw();
 
     while(procLoop()) {}
