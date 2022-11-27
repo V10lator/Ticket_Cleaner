@@ -276,7 +276,7 @@ static void deleteTickets()
                     }
 
                     // In case there was a matching ticket inside of the file either delete or recreate it with the remembered tickets only
-                    if(modified)
+                    if(!error && modified)
                     {
                         if(getListSize(ticketList) == 0)
                             FSARemove(fsaClient, path);
