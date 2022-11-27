@@ -336,7 +336,7 @@ static void deleteTickets()
 static uint32_t homeCallback(void *ctx)
 {
     uint64_t tid = OSGetTitleID();
-    if(tid == 0x0005000013374842 || (tid & 0xFFFFFFFFFFFFF0FF) == 0x000500101004A000) // HBL
+    if(tid == 0x0005000013374842 || (tid & 0xFFFFFFFFFFFFFCFF) == 0x000500101004A000) // HBL
         SYSRelaunchTitle(0, NULL);
     else
         SYSLaunchMenu();
