@@ -409,7 +409,7 @@ int main(void)
 
     ProcUIInit(OSSavesDone_ReadyToRelease);
     ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
-    OSEnableHomeButtonMenu(FALSE);
+    OSEnableHomeButtonMenu(false);
 
     WHBLogPrint("");
     WHBLogPrint("Press HOME to exit");
