@@ -2,12 +2,12 @@
 <app version="1">
   <name>Ticket Cleaner</name>
   <coder>V10lator</coder>
-  <version>1.6</version>
+  <version>1.7</version>
   <release_date>20221129000000</release_date>
-  <short_description>Deletes unused tickets on a Wii U</short_description>
-  <long_description>Checks if the title is installed. If not, the ticket gets deleted. 
-It also checks if there are multiple tickets for the same title, and if so, removes all but the first.
-(except for DLC tickets).</long_description>
+  <short_description>Deletes unused tickets.</short_description>
+  <long_description>This removes tickets for titles not installed as well as duplicated ones (except for DLC tickets).
+
+It also has a backup function.</long_description>
 <category>tool</category>
-<url>https://github.com/V10lator/Ticket_Cleaner/releases</url>
+<url>https://apps.fortheusers.org/wiiu/TicketCleaner</url>
 </app>
