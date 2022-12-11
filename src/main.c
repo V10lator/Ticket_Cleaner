@@ -21,6 +21,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <coreinit/filesystem_fsa.h>
@@ -40,6 +42,7 @@
 #define COLOR_RED        0x990000FF
 
 #define TICKET_BUCKET "/vol/slc/sys/rights/ticket/apps/"
+#define SD_PATH       "/vol/external01/wiiu/tickets"
 #define FS_ALIGN(x)   ((x + 0x3F) & ~(0x3F))
 #define isDLC(tid)    (((uint32_t)(tid >> 32)) == 0x0005000C)
 #define WRITE_BUFSIZE (1024 * 1024) // 1 MB
@@ -50,6 +53,16 @@ typedef struct
     uint8_t *start;
     size_t size;
 } TICKET_SECTION;
+
+typedef enum
+{
+    LOOP_STATE_MAIN_MENU,
+    LOOP_STATE_DELETING,
+    LOOP_STATE_DELETED,
+    LOOP_STATE_BACKING_UP,
+    LOOP_STATE_BACKUPED,
+    LOOP_STATE_INVALID,
+} LOOP_STATE;
 
 static FSAClientHandle fsaClient;
 static int mcpHandle;
@@ -129,6 +142,154 @@ static FSError closeTicket()
     }
 
     return FSACloseFile(fsaClient, fileHandle);
+}
+
+static size_t backupTickets()
+{
+    char sdPath[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = SD_PATH;
+    char *inSD = sdPath + strlen(SD_PATH);
+    FSAMakeDir(fsaClient, sdPath, 0x660);
+    FSADirectoryHandle dir;
+    FSError ret = FSAOpenDir(fsaClient, sdPath, &dir);
+    if(ret != FS_ERROR_OK)
+    {
+        WHBLogPrintf("Error opening %s", sdPath);
+        WHBLogPrint(FSAGetStatusStr(ret));
+        error = true;
+        return 0;
+    }
+
+    // Loop through all the folders to find a free slot
+    uint16_t slot = 0;
+    uint16_t current;
+    FSADirectoryEntry entry;
+    while(!error && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
+    {
+        if(entry.name[0] == '.' || !(entry.info.flags & FS_STAT_DIRECTORY) || strlen(entry.name) != 4)
+            continue;
+
+        current = strtol(entry.name, NULL, 16);
+        if(++current > slot)
+            slot = current;
+    }
+
+    FSACloseDir(fsaClient, dir);
+    sprintf(inSD, "/%04X", slot);
+    ret = FSAMakeDir(fsaClient, sdPath, 0x660);
+    if(ret != FS_ERROR_OK)
+    {
+        WHBLogPrintf("Error creating %s", sdPath);
+        WHBLogPrint(FSAGetStatusStr(ret));
+        error = true;
+        return 0;
+    }
+
+    inSD += 5;
+    *inSD = '/';
+    ++inSD;
+
+    size_t backuped = 0;
+    char path[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = TICKET_BUCKET;
+    char *inSentence = path + strlen(TICKET_BUCKET);
+    ret = FSAOpenDir(fsaClient, path, &dir);
+    if(ret == FS_ERROR_OK)
+    {
+        FSADirectoryHandle dir2;
+        char *fileName;
+        void *file;
+        char *inSD2 = inSD + 4;
+
+        // Loop through all the folder inside of the ticket bucket
+        while(!error && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
+        {
+            if(entry.name[0] == '.' || !(entry.info.flags & FS_STAT_DIRECTORY) || strlen(entry.name) != 4)
+                continue;
+
+            strcpy(inSentence, entry.name);
+            ret = FSAOpenDir(fsaClient, path, &dir2);
+            if(ret != FS_ERROR_OK)
+            {
+                WHBLogPrintf("Error opening %s", path);
+                WHBLogPrint(FSAGetStatusStr(ret));
+                error = true;
+                break;
+            }
+
+            OSBlockMove(inSD, entry.name, 5, false);
+            ret = FSAMakeDir(fsaClient, sdPath, 0x660);
+            if(ret != FS_ERROR_OK)
+            {
+                WHBLogPrintf("Error creating %s", sdPath);
+                WHBLogPrint(FSAGetStatusStr(ret));
+                error = true;
+                break;
+            }
+
+            strcat(inSentence, "/");
+            fileName = inSentence + strlen(inSentence);
+            // Loop through all the subfolders
+            while(!error && FSAReadDir(fsaClient, dir2, &entry) == FS_ERROR_OK)
+            {
+                if(entry.name[0] == '.' || (entry.info.flags & FS_STAT_DIRECTORY) || strlen(entry.name) != 12)
+                    continue;
+
+                strcpy(fileName, entry.name);
+                ret = readFile(path, &file, entry.info.size);
+                if(ret == FS_ERROR_OK)
+                {
+                    *inSD2 = '/';
+                    strcpy(inSD2 + 1, fileName);
+                    ret = FSAOpenFileEx(fsaClient, sdPath, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle);
+                    if(ret == FS_ERROR_OK)
+                    {
+                        ret = FSAWriteFile(fsaClient, file, entry.info.size, 1, fileHandle, 0);
+                        if(ret != 1)
+                        {
+                            WHBLogPrintf("Error writing %s", sdPath);
+                            WHBLogPrint(FSAGetStatusStr(ret));
+                            error = true;
+                        }
+                        ret = FSACloseFile(fsaClient, fileHandle);
+                        if(ret != FS_ERROR_OK)
+                        {
+                            WHBLogPrintf("Error closing %s", sdPath);
+                            WHBLogPrint(FSAGetStatusStr(ret));
+                            error = true;
+                        }
+
+                        ++backuped;
+                    }
+                    else
+                    {
+                        WHBLogPrintf("Error creating %s", sdPath);
+                        WHBLogPrint(FSAGetStatusStr(ret));
+                        error = true;
+                    }
+                }
+                else
+                {
+                    WHBLogPrintf("Error reading %s", path);
+                    WHBLogPrint(FSAGetStatusStr(ret));
+                    error = true;
+                }
+
+                MEMFreeToDefaultHeap(file);
+            }
+
+            FSACloseDir(fsaClient, dir2);
+        }
+
+        FSACloseDir(fsaClient, dir);
+    }
+    else
+    {
+        WHBLogPrintf("Error opening %s", path);
+        WHBLogPrint(FSAGetStatusStr(ret));
+        error = true;
+    }
+
+    // TODO
+    return backuped;
 }
 
 static size_t deleteTickets()
@@ -407,11 +568,11 @@ void mainLoop()
     ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
     OSEnableHomeButtonMenu(false);
 
-    int state = 0;
-    int oldState = -1;
+    LOOP_STATE state = LOOP_STATE_MAIN_MENU;
+    LOOP_STATE oldState = LOOP_STATE_INVALID;
     size_t retValue;
     int buttons;
-    while(procLoop())
+    while(!error && procLoop())
     {
         if(state != oldState)
         {
@@ -420,15 +581,25 @@ void mainLoop()
 
             switch(state)
             {
-                case 0:
+                case LOOP_STATE_MAIN_MENU:
                     WHBLogPrint("Press (A) to delete unused tickets.");
+                    WHBLogPrint("Press (B) to backup all tickets.");
                     WHBLogPrint("Press (HOME) to exit.");
                     break;
-                case 1:
+                case LOOP_STATE_DELETING:
                     WHBLogPrint("Deleting tickets, this might take some time...");
                     break;
-                case 2:
+                case LOOP_STATE_DELETED:
                     WHBLogPrintf("%u tickets deleted!", retValue);
+                    WHBLogPrint("");
+                    WHBLogPrint("Press (B) to go back.");
+                    WHBLogPrint("Press (HOME) to exit.");
+                    break;
+                case LOOP_STATE_BACKING_UP:
+                    WHBLogPrint("Creating backup, this might take some time...");
+                    break;
+                case LOOP_STATE_BACKUPED:
+                    WHBLogPrintf("%u ticket files saved!", retValue);
                     WHBLogPrint("");
                     WHBLogPrint("Press (B) to go back.");
                     WHBLogPrint("Press (HOME) to exit.");
@@ -446,13 +617,20 @@ void mainLoop()
         {
             case 0:
                 if(buttons & VPAD_BUTTON_A)
-                    state = 1;
+                    state = LOOP_STATE_DELETING;
+                else if(buttons & VPAD_BUTTON_B)
+                    state = LOOP_STATE_BACKING_UP;
                 break;
-            case 1:
+            case LOOP_STATE_DELETING:
                 retValue = deleteTickets();
-                state = 2;
+                state = LOOP_STATE_DELETED;
                 break;
-            case 2:
+            case LOOP_STATE_BACKING_UP:
+                retValue = backupTickets();
+                state = LOOP_STATE_BACKUPED;
+                break;
+            case LOOP_STATE_DELETED:
+            case LOOP_STATE_BACKUPED:
                 if(buttons & VPAD_BUTTON_B)
                     state = 0;
                 break;
@@ -535,21 +713,20 @@ int main()
         error = true;
     }
 
-    if(!initted)
+    if(error)
     {
-        ProcUIInit(OSSavesDone_ReadyToRelease);
-        ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
-        OSEnableHomeButtonMenu(false);
-
-        if(error)
+        if(!initted)
         {
-            WHBLogPrint("");
-            WHBLogConsoleSetColor(COLOR_RED);
+            ProcUIInit(OSSavesDone_ReadyToRelease);
+            ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
+            OSEnableHomeButtonMenu(false);
         }
 
+        WHBLogPrint("");
         WHBLogPrint("Press HOME to exit");
-
+        WHBLogConsoleSetColor(COLOR_RED);
         WHBLogConsoleDraw();
+
         while(procLoop())
             OSSleepTicks(OSMillisecondsToTicks(1000 / 60));
     }
