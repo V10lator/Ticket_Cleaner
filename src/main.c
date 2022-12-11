@@ -32,6 +32,7 @@
 #include <mocha/mocha.h>
 #include <proc_ui/procui.h>
 #include <sysapp/launch.h>
+#include <vpad/input.h>
 #include <whb/log.h>
 #include <whb/log_console.h>
 
@@ -42,6 +43,7 @@
 #define FS_ALIGN(x)   ((x + 0x3F) & ~(0x3F))
 #define isDLC(tid)    (((uint32_t)(tid >> 32)) == 0x0005000C)
 #define WRITE_BUFSIZE (1024 * 1024) // 1 MB
+#define MAX_LINES     16
 
 typedef struct
 {
@@ -57,6 +59,12 @@ static uint8_t *writeBuffer;
 static size_t writeBufferFill = 0;
 
 static bool error = false;
+
+static void clearScreen()
+{
+    for(int i = 0; i < MAX_LINES; ++i)
+        WHBLogPrint("");
+}
 
 static FSError readFile(const char *path, void **buffer, size_t size)
 {
@@ -123,14 +131,14 @@ static FSError closeTicket()
     return FSACloseFile(fsaClient, fileHandle);
 }
 
-static void deleteTickets()
+static size_t deleteTickets()
 {
     LIST *handledIds = createList();
     if(handledIds == NULL)
     {
         WHBLogPrint("EOM!");
         error = true;
-        return;
+        return 0;
     }
 
     size_t deletedTickets = 0;
@@ -348,7 +356,7 @@ static void deleteTickets()
     }
 
     destroyList(handledIds, true);
-    WHBLogPrintf("%u tickets deleted!", deletedTickets);
+    return deletedTickets;
 }
 
 static uint32_t homeCallback(void *ctx)
@@ -377,8 +385,86 @@ static bool procLoop()
     }
 }
 
+int readInput()
+{
+    VPADReadError vError;
+    VPADStatus vpad;
+    VPADRead(VPAD_CHAN_0, &vpad, 1, &vError);
+    if(vError == VPAD_READ_SUCCESS && vpad.trigger)
+    {
+        vpad.trigger &= ~(VPAD_STICK_R_EMULATION_LEFT | VPAD_STICK_R_EMULATION_RIGHT | VPAD_STICK_R_EMULATION_UP | VPAD_STICK_R_EMULATION_DOWN | VPAD_BUTTON_HOME);
+        return vpad.trigger;
+    }
+
+    return 0;
+}
+
+void mainLoop()
+{
+    WHBLogConsoleSetColor(COLOR_BACKGROUND);
+
+    ProcUIInit(OSSavesDone_ReadyToRelease);
+    ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
+    OSEnableHomeButtonMenu(false);
+
+    int state = 0;
+    int oldState = -1;
+    size_t retValue;
+    int buttons;
+    while(procLoop())
+    {
+        if(state != oldState)
+        {
+            oldState = state;
+            clearScreen();
+
+            switch(state)
+            {
+                case 0:
+                    WHBLogPrint("Press (A) to delete unused tickets.");
+                    WHBLogPrint("Press (HOME) to exit.");
+                    break;
+                case 1:
+                    WHBLogPrint("Deleting tickets, this might take some time...");
+                    break;
+                case 2:
+                    WHBLogPrintf("%u tickets deleted!", retValue);
+                    WHBLogPrint("");
+                    WHBLogPrint("Press (B) to go back.");
+                    WHBLogPrint("Press (HOME) to exit.");
+                    break;
+                default:
+                    WHBLogPrint("0xDEADCODE");
+                    break;
+            }
+
+            WHBLogConsoleDraw();
+        }
+
+        buttons = readInput();
+        switch(state)
+        {
+            case 0:
+                if(buttons & VPAD_BUTTON_A)
+                    state = 1;
+                break;
+            case 1:
+                retValue = deleteTickets();
+                state = 2;
+                break;
+            case 2:
+                if(buttons & VPAD_BUTTON_B)
+                    state = 0;
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 int main()
 {
+    bool initted = false;
     WHBLogConsoleInit();
     writeBuffer = MEMAllocFromDefaultHeapEx(FS_ALIGN(WRITE_BUFSIZE), 0x40);
     if(writeBuffer != NULL)
@@ -399,10 +485,9 @@ int main()
                         mcpHandle = MCP_Open();
                         if(mcpHandle != 0)
                         {
+                            initted = true;
                             WHBLogConsoleSetColor(COLOR_BACKGROUND);
-                            WHBLogPrint("Deleting tickets, this might take some time...");
-                            WHBLogConsoleDraw();
-                            deleteTickets();
+                            mainLoop();
                             MCP_Close(mcpHandle);
                         }
                         else
@@ -450,18 +535,24 @@ int main()
         error = true;
     }
 
-    ProcUIInit(OSSavesDone_ReadyToRelease);
-    ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
-    OSEnableHomeButtonMenu(false);
+    if(!initted)
+    {
+        ProcUIInit(OSSavesDone_ReadyToRelease);
+        ProcUIRegisterCallback(PROCUI_CALLBACK_HOME_BUTTON_DENIED, homeCallback, NULL, 100);
+        OSEnableHomeButtonMenu(false);
 
-    WHBLogPrint("");
-    WHBLogPrint("Press HOME to exit");
-    if(error)
-        WHBLogConsoleSetColor(COLOR_RED);
+        if(error)
+        {
+            WHBLogPrint("");
+            WHBLogConsoleSetColor(COLOR_RED);
+        }
 
-    WHBLogConsoleDraw();
-    while(procLoop())
-        OSSleepTicks(OSMillisecondsToTicks(1000 / 60));
+        WHBLogPrint("Press HOME to exit");
+
+        WHBLogConsoleDraw();
+        while(procLoop())
+            OSSleepTicks(OSMillisecondsToTicks(1000 / 60));
+    }
 
     return 0;
 }
