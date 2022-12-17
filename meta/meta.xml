@@ -2,7 +2,7 @@
 <app version="1">
   <name>Ticket Cleaner</name>
   <coder>V10lator</coder>
-  <version>1.7</version>
+  <version>1.8</version>
   <release_date>20221129000000</release_date>
   <short_description>Deletes unused tickets.</short_description>
   <long_description>This removes tickets for titles not installed as well as duplicated ones (except for DLC tickets).
