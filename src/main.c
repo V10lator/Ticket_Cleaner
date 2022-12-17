@@ -41,18 +41,26 @@
 #define COLOR_BACKGROUND 0x000033FF
 #define COLOR_RED        0x990000FF
 
-#define TICKET_BUCKET "/vol/slc/sys/rights/ticket/apps/"
-#define SD_PATH       "/vol/external01/wiiu/tickets"
-#define FS_ALIGN(x)   ((x + 0x3F) & ~(0x3F))
-#define isDLC(tid)    (((uint32_t)(tid >> 32)) == 0x0005000C)
-#define WRITE_BUFSIZE (1024 * 1024) // 1 MB
-#define MAX_LINES     16
+#define TICKET_BUCKET    "/vol/slc/sys/rights/ticket/apps/"
+#define SD_PATH          "/vol/external01/wiiu/tickets"
+#define TICKET_LIST_PATH "/vol/slc/sys/rights/sys/title.list"
+#define FS_ALIGN(x)      ((x + 0x3F) & ~(0x3F))
+#define isDLC(tid)       (((uint32_t)(tid >> 32)) == 0x0005000C)
+#define WRITE_BUFSIZE    (1024 * 1024) // 1 MB
+#define MAX_LINES        16
 
 typedef struct
 {
     uint8_t *start;
     size_t size;
 } TICKET_SECTION;
+
+typedef struct TITLE_LIST_ENTRY TITLE_LIST_ENTRY;
+struct TITLE_LIST_ENTRY
+{
+    uint64_t tid;
+    TITLE_LIST_ENTRY *next;
+};
 
 typedef enum
 {
@@ -142,6 +150,85 @@ static FSError closeTicket()
     }
 
     return FSACloseFile(fsaClient, fileHandle);
+}
+
+static TITLE_LIST_ENTRY *titleList;
+
+static FSError readTitleList()
+{
+    char path[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = TICKET_LIST_PATH;
+    FSStat stat;
+    FSError ret = FSAGetStat(fsaClient, path, &stat);
+    if(ret != FS_ERROR_OK)
+        return ret;
+
+    uint64_t *file;
+    ret = readFile(path, (void **)&file, stat.size);
+    if(ret != FS_ERROR_OK)
+        return ret;
+
+    TITLE_LIST_ENTRY *cur = NULL;
+    TITLE_LIST_ENTRY *last = NULL;
+    for(size_t i = 0; i < stat.size / sizeof(uint64_t); ++i)
+    {
+        cur = MEMAllocFromDefaultHeap(sizeof(TITLE_LIST_ENTRY));
+        if(cur == NULL)
+        {
+            // TODO
+        }
+
+        cur->tid = file[i];
+        cur->next = NULL;
+
+        if(last == NULL)
+            titleList = cur;
+        else
+        {
+            last->next = cur;
+            last = cur;
+        }
+
+        last = cur;
+    }
+
+    return FS_ERROR_OK;
+}
+
+static void removeFromTitleList(uint64_t tid)
+{
+    TITLE_LIST_ENTRY *last = NULL;
+    for(TITLE_LIST_ENTRY *cur = titleList; cur != NULL; cur = cur->next)
+    {
+        if(cur->tid == tid)
+        {
+            if(last != NULL)
+                last->next = cur->next;
+            else
+                titleList = cur->next;
+
+            MEMFreeToDefaultHeap(cur);
+            return;
+        }
+
+        last = cur;
+    }
+}
+
+static FSError writeTitleList()
+{
+    char path[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = TICKET_LIST_PATH;
+    FSError ret = FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle);
+    if(ret != FS_ERROR_OK)
+        return ret;
+
+    for(TITLE_LIST_ENTRY *cur = titleList; cur != NULL; cur = cur->next)
+    {
+        ret = writeTicket((uint8_t *)&(cur->tid), sizeof(uint64_t));
+        if(ret != FS_ERROR_OK)
+            return ret;
+    }
+
+    return closeTicket();
 }
 
 static size_t backupTickets()
@@ -427,6 +514,10 @@ static size_t deleteTickets()
                         }
                         else
                         {
+                            removeFromTitleList(ticket->tid);
+                            if(error)
+                                break;
+
                             ++deletedTickets;
                             modified = true;
                         }
@@ -517,6 +608,18 @@ static size_t deleteTickets()
     }
 
     destroyList(handledIds, true);
+
+    if(!error && deletedTickets != 0)
+    {
+        FSError ret = writeTitleList();
+        if(ret != FS_ERROR_OK)
+        {
+            WHBLogPrint("Error writing title.list!");
+            WHBLogPrint(FSAGetStatusStr(ret));
+            error = true;
+        }
+    }
+
     return deletedTickets;
 }
 
@@ -663,10 +766,19 @@ int main()
                         mcpHandle = MCP_Open();
                         if(mcpHandle != 0)
                         {
-                            initted = true;
-                            WHBLogConsoleSetColor(COLOR_BACKGROUND);
-                            mainLoop();
-                            MCP_Close(mcpHandle);
+                            err = readTitleList();
+                            if(err == FS_ERROR_OK)
+                            {
+                                initted = true;
+                                WHBLogConsoleSetColor(COLOR_BACKGROUND);
+                                mainLoop();
+                                MCP_Close(mcpHandle);
+                            }
+                            else
+                            {
+                                WHBLogPrint("Error reading title.list!");
+                                error = true;
+                            }
                         }
                         else
                         {
