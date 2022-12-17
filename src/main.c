@@ -105,6 +105,8 @@ static FSError readFile(const char *path, void **buffer, size_t size)
 
             MEMFreeToDefaultHeap(*buffer);
         }
+        else
+            err = FS_ERROR_OUT_OF_RESOURCES;
 
         FSACloseFile(fsaClient, handle);
     }
