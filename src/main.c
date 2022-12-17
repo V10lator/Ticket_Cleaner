@@ -685,6 +685,9 @@ void mainLoop()
             switch(state)
             {
                 case LOOP_STATE_MAIN_MENU:
+                    WHBLogPrint("Special thanks to: Ingunar");
+                    WHBLogPrint("");
+                    WHBLogPrint("");
                     WHBLogPrint("Press (A) to delete unused tickets.");
                     WHBLogPrint("Press (B) to backup all tickets.");
                     WHBLogPrint("Press (HOME) to exit.");
