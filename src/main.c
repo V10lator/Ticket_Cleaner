@@ -81,6 +81,8 @@ static size_t writeBufferFill = 0;
 
 static bool error = false;
 
+static TITLE_LIST_ENTRY *titleList = NULL;
+
 static void clearScreen()
 {
     for(int i = 0; i < MAX_LINES; ++i)
@@ -154,7 +156,13 @@ static FSError closeTicket()
     return FSACloseFile(fsaClient, fileHandle);
 }
 
-static TITLE_LIST_ENTRY *titleList;
+static void clearTitleList()
+{
+    for(TITLE_LIST_ENTRY *cur = titleList; cur != NULL; cur = cur->next)
+        MEMFreeToDefaultHeap(cur);
+
+    titleList = NULL;
+}
 
 static FSError readTitleList()
 {
@@ -176,7 +184,8 @@ static FSError readTitleList()
         cur = MEMAllocFromDefaultHeap(sizeof(TITLE_LIST_ENTRY));
         if(cur == NULL)
         {
-            // TODO
+            clearTitleList();
+            return FS_ERROR_OUT_OF_RESOURCES;
         }
 
         cur->tid = file[i];
@@ -777,13 +786,15 @@ int main()
                                 initted = true;
                                 WHBLogConsoleSetColor(COLOR_BACKGROUND);
                                 mainLoop();
-                                MCP_Close(mcpHandle);
+                                clearTitleList();
                             }
                             else
                             {
                                 WHBLogPrint("Error reading title.list!");
                                 error = true;
                             }
+
+                            MCP_Close(mcpHandle);
                         }
                         else
                         {
