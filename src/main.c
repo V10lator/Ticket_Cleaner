@@ -45,7 +45,6 @@
 #define SD_PATH       "/vol/external01/wiiu/tickets"
 #define FS_ALIGN(x)   ((x + 0x3F) & ~(0x3F))
 #define isDLC(tid)    (((uint32_t)(tid >> 32)) == 0x0005000C)
-#define isUpdate(tid) (((uint32_t)(tid >> 32)) == 0x0005000E)
 #define WRITE_BUFSIZE (1024 * 1024) // 1 MB
 #define MAX_LINES     16
 
@@ -370,29 +369,25 @@ static size_t deleteTickets()
                             ptr += ticket->total_hdr_size - 0x14;
 
                         keep = true;
-                        // TODO: Ignore updates
-                        if(!isUpdate(ticket->tid))
+                        // Check that title is installed
+                        if(MCP_GetTitleInfo(mcpHandle, ticket->tid, &titleEntry) != 0)
+                            keep = false;
+                        // Check for duplicated tickets (ignoring DLC tickets)
+                        else if(!isDLC(ticket->tid))
                         {
-                            // Check that title is installed
-                            if(MCP_GetTitleInfo(mcpHandle, ticket->tid, &titleEntry) != 0)
-                                keep = false;
-                            // Check for duplicated tickets (ignoring DLC tickets)
-                            else if(!isDLC(ticket->tid))
+                            forEachListEntry(handledIds, tid)
                             {
-                                forEachListEntry(handledIds, tid)
+                                if(ticket->tid == *tid)
                                 {
-                                    if(ticket->tid == *tid)
-                                    {
-                                        keep = false;
-                                        break;
-                                    }
+                                    keep = false;
+                                    break;
                                 }
                             }
                         }
 
                         if(keep)
                         {
-                            if(!isDLC(ticket->tid) && !isUpdate(ticket->tid))
+                            if(!isDLC(ticket->tid))
                             {
                                 tid = MEMAllocFromDefaultHeap(sizeof(uint64_t));
                                 if(!tid)
