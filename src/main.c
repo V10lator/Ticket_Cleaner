@@ -79,14 +79,28 @@ static FSAFileHandle fileHandle;
 static uint8_t *writeBuffer;
 static size_t writeBufferFill = 0;
 
+static size_t arg0;
+static size_t arg1;
 static bool error = false;
-
-static TITLE_LIST_ENTRY *titleList = NULL;
 
 static void clearScreen()
 {
     for(int i = 0; i < MAX_LINES; ++i)
         WHBLogPrint("");
+}
+
+static bool isSystemTitle(uint64_t tid)
+{
+    uint32_t th = (uint32_t)(tid >> 32);
+    switch(th)
+    {
+        case 0x00050010:
+        case 0x0005001B:
+        case 0x00050030:
+            return true;
+    }
+
+    return false;
 }
 
 static FSError readFile(const char *path, void **buffer, size_t size)
@@ -156,93 +170,106 @@ static FSError closeTicket()
     return FSACloseFile(fsaClient, fileHandle);
 }
 
-static void clearTitleList()
-{
-    for(TITLE_LIST_ENTRY *cur = titleList; cur != NULL; cur = cur->next)
-        MEMFreeToDefaultHeap(cur);
-
-    titleList = NULL;
-}
-
-static FSError readTitleList()
+static void cleanTitleList()
 {
     char path[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = TICKET_LIST_PATH;
     FSStat stat;
     FSError ret = FSAGetStat(fsaClient, path, &stat);
     if(ret != FS_ERROR_OK)
-        return ret;
+    {
+        WHBLogPrintf("Error stating %s", path);
+        WHBLogPrint(FSAGetStatusStr(ret));
+        error = true;
+        return;
+    }
 
     uint64_t *file;
     ret = readFile(path, (void **)&file, stat.size);
     if(ret != FS_ERROR_OK)
-        return ret;
+    {
+        WHBLogPrintf("Error reading %s", path);
+        WHBLogPrint(FSAGetStatusStr(ret));
+        error = true;
+        return;
+    }
 
+    TITLE_LIST_ENTRY *titleList = NULL;
     TITLE_LIST_ENTRY *cur = NULL;
     TITLE_LIST_ENTRY *last = NULL;
+    arg1 = 0;
+    MCPTitleListType titleEntry __attribute__((__aligned__(0x40)));
     for(size_t i = 0; i < stat.size / sizeof(uint64_t); ++i)
     {
-        cur = MEMAllocFromDefaultHeap(sizeof(TITLE_LIST_ENTRY));
-        if(cur == NULL)
+        if(isSystemTitle(file[i]) || MCP_GetTitleInfo(mcpHandle, file[i], &titleEntry) == 0)
         {
-            clearTitleList();
-            return FS_ERROR_OUT_OF_RESOURCES;
-        }
+            cur = MEMAllocFromDefaultHeap(sizeof(TITLE_LIST_ENTRY));
+            if(cur == NULL)
+            {
+                WHBLogPrint("EOM!");
+                error = true;
+                break;
+            }
 
-        cur->tid = file[i];
-        cur->next = NULL;
+            cur->tid = file[i];
+            cur->next = NULL;
 
-        if(last == NULL)
-            titleList = cur;
-        else
-        {
-            last->next = cur;
+            if(last == NULL)
+                titleList = cur;
+            else
+            {
+                last->next = cur;
+                last = cur;
+            }
+
             last = cur;
         }
-
-        last = cur;
+        else
+            ++arg1;
     }
 
-    return FS_ERROR_OK;
-}
+    MEMFreeToDefaultHeap(file);
 
-static void removeFromTitleList(uint64_t tid)
-{
-    TITLE_LIST_ENTRY *last = NULL;
-    for(TITLE_LIST_ENTRY *cur = titleList; cur != NULL; cur = cur->next)
+    if(arg1 != 0)
     {
-        if(cur->tid == tid)
+        ret = FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle);
+        if(ret == FS_ERROR_OK)
         {
-            if(last != NULL)
-                last->next = cur->next;
-            else
-                titleList = cur->next;
+            for(TITLE_LIST_ENTRY *cur = titleList; cur != NULL; cur = cur->next)
+            {
+                ret = writeTicket((uint8_t *)&(cur->tid), sizeof(uint64_t));
+                if(ret != FS_ERROR_OK)
+                {
+                    WHBLogPrintf("Error writing %s", path);
+                    WHBLogPrint(FSAGetStatusStr(ret));
+                    error = true;
+                    break;
+                }
+            }
 
-            MEMFreeToDefaultHeap(cur);
-            return;
+            if(!error)
+            {
+                ret = closeTicket();
+                if(ret != FS_ERROR_OK)
+                {
+                    WHBLogPrintf("Error closing %s", path);
+                    WHBLogPrint(FSAGetStatusStr(ret));
+                    error = true;
+                }
+            }
         }
-
-        last = cur;
-    }
-}
-
-static FSError writeTitleList()
-{
-    char path[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = TICKET_LIST_PATH;
-    FSError ret = FSAOpenFileEx(fsaClient, path, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle);
-    if(ret != FS_ERROR_OK)
-        return ret;
-
-    for(TITLE_LIST_ENTRY *cur = titleList; cur != NULL; cur = cur->next)
-    {
-        ret = writeTicket((uint8_t *)&(cur->tid), sizeof(uint64_t));
-        if(ret != FS_ERROR_OK)
-            return ret;
+        else
+        {
+            WHBLogPrintf("Error opening %s", path);
+            WHBLogPrint(FSAGetStatusStr(ret));
+            error = true;
+        }
     }
 
-    return closeTicket();
+    for(; titleList != NULL; titleList = titleList->next)
+        MEMFreeToDefaultHeap(titleList);
 }
 
-static size_t backupTickets()
+static void backupTickets()
 {
     char sdPath[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = SD_PATH;
     char *inSD = sdPath + strlen(SD_PATH);
@@ -254,7 +281,7 @@ static size_t backupTickets()
         WHBLogPrintf("Error opening %s", sdPath);
         WHBLogPrint(FSAGetStatusStr(ret));
         error = true;
-        return 0;
+        return;
     }
 
     // Loop through all the folders to find a free slot
@@ -279,14 +306,13 @@ static size_t backupTickets()
         WHBLogPrintf("Error creating %s", sdPath);
         WHBLogPrint(FSAGetStatusStr(ret));
         error = true;
-        return 0;
+        return;
     }
 
     inSD += 5;
     *inSD = '/';
     ++inSD;
 
-    size_t backuped = 0;
     char path[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = TICKET_BUCKET;
     char *inSentence = path + strlen(TICKET_BUCKET);
     ret = FSAOpenDir(fsaClient, path, &dir);
@@ -296,6 +322,7 @@ static size_t backupTickets()
         char *fileName;
         void *file;
         char *inSD2 = inSD + 4;
+        arg0 = 0;
 
         // Loop through all the folder inside of the ticket bucket
         while(!error && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
@@ -355,7 +382,7 @@ static size_t backupTickets()
                             error = true;
                         }
 
-                        ++backuped;
+                        ++arg0;
                     }
                     else
                     {
@@ -385,22 +412,18 @@ static size_t backupTickets()
         WHBLogPrint(FSAGetStatusStr(ret));
         error = true;
     }
-
-    // TODO
-    return backuped;
 }
 
-static size_t deleteTickets()
+static void deleteTickets()
 {
     LIST *handledIds = createList();
     if(handledIds == NULL)
     {
         WHBLogPrint("EOM!");
         error = true;
-        return 0;
+        return;
     }
 
-    size_t deletedTickets = 0;
     LIST *ticketList = createList();
     if(ticketList != NULL)
     {
@@ -422,6 +445,8 @@ static size_t deleteTickets()
             uint8_t *fileEnd;
             uint8_t *ptr;
             MCPTitleListType titleEntry __attribute__((__aligned__(0x40)));
+            arg0 = 0;
+
             // Loop through all the folder inside of the ticket bucket
             while(!error && FSAReadDir(fsaClient, dir, &entry) == FS_ERROR_OK)
             {
@@ -525,11 +550,7 @@ static size_t deleteTickets()
                         }
                         else
                         {
-                            removeFromTitleList(ticket->tid);
-                            if(error)
-                                break;
-
-                            ++deletedTickets;
+                            ++arg0;
                             modified = true;
                         }
 
@@ -619,19 +640,8 @@ static size_t deleteTickets()
     }
 
     destroyList(handledIds, true);
-
-    if(!error && deletedTickets != 0)
-    {
-        FSError ret = writeTitleList();
-        if(ret != FS_ERROR_OK)
-        {
-            WHBLogPrint("Error writing title.list!");
-            WHBLogPrint(FSAGetStatusStr(ret));
-            error = true;
-        }
-    }
-
-    return deletedTickets;
+    if(!error)
+        cleanTitleList();
 }
 
 static uint32_t homeCallback(void *ctx)
@@ -684,7 +694,6 @@ void mainLoop()
 
     LOOP_STATE state = LOOP_STATE_MAIN_MENU;
     LOOP_STATE oldState = LOOP_STATE_INVALID;
-    size_t retValue;
     int buttons;
     while(!error && procLoop())
     {
@@ -707,7 +716,7 @@ void mainLoop()
                     WHBLogPrint("Deleting tickets, this might take some time...");
                     break;
                 case LOOP_STATE_DELETED:
-                    WHBLogPrintf("%u tickets deleted!", retValue);
+                    WHBLogPrintf("%u tickets deleted and %u entries removed from title.list!", arg0, arg1);
                     WHBLogPrint("");
                     WHBLogPrint("Press (B) to go back.");
                     WHBLogPrint("Press (HOME) to exit.");
@@ -716,7 +725,7 @@ void mainLoop()
                     WHBLogPrint("Creating backup, this might take some time...");
                     break;
                 case LOOP_STATE_BACKUPED:
-                    WHBLogPrintf("%u ticket files saved!", retValue);
+                    WHBLogPrintf("%u ticket files saved!", arg0);
                     WHBLogPrint("");
                     WHBLogPrint("Press (B) to go back.");
                     WHBLogPrint("Press (HOME) to exit.");
@@ -739,11 +748,11 @@ void mainLoop()
                     state = LOOP_STATE_BACKING_UP;
                 break;
             case LOOP_STATE_DELETING:
-                retValue = deleteTickets();
+                deleteTickets();
                 state = LOOP_STATE_DELETED;
                 break;
             case LOOP_STATE_BACKING_UP:
-                retValue = backupTickets();
+                backupTickets();
                 state = LOOP_STATE_BACKUPED;
                 break;
             case LOOP_STATE_DELETED:
@@ -780,20 +789,9 @@ int main()
                         mcpHandle = MCP_Open();
                         if(mcpHandle != 0)
                         {
-                            err = readTitleList();
-                            if(err == FS_ERROR_OK)
-                            {
-                                initted = true;
-                                WHBLogConsoleSetColor(COLOR_BACKGROUND);
-                                mainLoop();
-                                clearTitleList();
-                            }
-                            else
-                            {
-                                WHBLogPrint("Error reading title.list!");
-                                error = true;
-                            }
-
+                            initted = true;
+                            WHBLogConsoleSetColor(COLOR_BACKGROUND);
+                            mainLoop();
                             MCP_Close(mcpHandle);
                         }
                         else
