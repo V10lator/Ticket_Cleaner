@@ -315,12 +315,12 @@ static void backupTickets()
 
     char path[FS_ALIGN(FS_MAX_PATH)] __attribute__((__aligned__(0x40))) = TICKET_BUCKET;
     char *inSentence = path + strlen(TICKET_BUCKET);
+    void *file;
     ret = FSAOpenDir(fsaClient, path, &dir);
     if(ret == FS_ERROR_OK)
     {
         FSADirectoryHandle dir2;
         char *fileName;
-        void *file;
         char *inSD2 = inSD + 4;
         arg0 = 0;
 
@@ -412,6 +412,51 @@ static void backupTickets()
         WHBLogPrint(FSAGetStatusStr(ret));
         error = true;
     }
+
+    if(error)
+        return;
+
+    strcpy(path, TICKET_LIST_PATH);
+    FSStat stat;
+    ret = FSAGetStat(fsaClient, path, &stat);
+    if(ret != FS_ERROR_OK)
+    {
+        WHBLogPrintf("Error stating %s", path);
+        WHBLogPrint(FSAGetStatusStr(ret));
+        error = true;
+        return;
+    }
+
+    ret = readFile(path, &file, stat.size);
+    if(ret != FS_ERROR_OK)
+    {
+        WHBLogPrintf("Error opening %s", path);
+        WHBLogPrint(FSAGetStatusStr(ret));
+        error = true;
+    }
+
+    strcpy(inSD, "title.list");
+    ret = FSAOpenFileEx(fsaClient, sdPath, "w", 0x660, FS_OPEN_FLAG_NONE, 0, &fileHandle);
+    if(ret == FS_ERROR_OK)
+    {
+        ret = FSAWriteFile(fsaClient, file, stat.size, 1, fileHandle, 0);
+        if(ret != 1)
+        {
+            WHBLogPrintf("Error writing %s", sdPath);
+            WHBLogPrint(FSAGetStatusStr(ret));
+            error = true;
+        }
+
+        ret = FSACloseFile(fsaClient, fileHandle);
+        if(ret != FS_ERROR_OK)
+        {
+            WHBLogPrintf("Error closing %s", sdPath);
+            WHBLogPrint(FSAGetStatusStr(ret));
+            error = true;
+        }
+    }
+
+    MEMFreeToDefaultHeap(file);
 }
 
 static void deleteTickets()
