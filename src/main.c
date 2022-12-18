@@ -246,15 +246,12 @@ static void cleanTitleList()
                 }
             }
 
-            if(!error)
+            ret = closeTicket();
+            if(ret != FS_ERROR_OK)
             {
-                ret = closeTicket();
-                if(ret != FS_ERROR_OK)
-                {
-                    WHBLogPrintf("Error closing %s", path);
-                    WHBLogPrint(FSAGetStatusStr(ret));
-                    error = true;
-                }
+                WHBLogPrintf("Error closing %s", path);
+                WHBLogPrint(FSAGetStatusStr(ret));
+                error = true;
             }
         }
         else
